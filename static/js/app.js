@@ -13,6 +13,8 @@ const lastUpdatedTime = document.getElementById('last-updated-time');
 const searchInput = document.getElementById('search-input');
 const searchClear = document.getElementById('search-clear');
 const categoryFilters = document.getElementById('category-filters');
+const btnExport = document.getElementById('btn-export');
+const btnThemeToggle = document.getElementById('btn-theme-toggle');
 
 // Stats Elements
 const statTotal = document.getElementById('stat-total');
@@ -31,15 +33,56 @@ const btnSubmitTweet = document.getElementById('btn-submit-tweet');
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
     fetchReleases();
     setupEventListeners();
 });
+
+// Theme Initialization
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    if (savedTheme === 'light') {
+        document.body.classList.add('light-theme');
+        updateThemeIcon(true);
+    } else {
+        updateThemeIcon(false);
+    }
+}
+
+// Update Toggle Icon
+function updateThemeIcon(isLight) {
+    if (isLight) {
+        btnThemeToggle.innerHTML = '<i data-feather="moon"></i>';
+    } else {
+        btnThemeToggle.innerHTML = '<i data-feather="sun"></i>';
+    }
+    feather.replace();
+}
 
 // Setup Listeners
 function setupEventListeners() {
     // Refresh button
     btnRefresh.addEventListener('click', () => {
         fetchReleases(true);
+    });
+
+    // Theme Toggle
+    btnThemeToggle.addEventListener('click', () => {
+        const isCurrentlyLight = document.body.classList.contains('light-theme');
+        if (isCurrentlyLight) {
+            document.body.classList.remove('light-theme');
+            localStorage.setItem('theme', 'dark');
+            updateThemeIcon(false);
+        } else {
+            document.body.classList.add('light-theme');
+            localStorage.setItem('theme', 'light');
+            updateThemeIcon(true);
+        }
+    });
+
+    // Export CSV
+    btnExport.addEventListener('click', () => {
+        exportToCSV();
     });
 
     // Search input
@@ -179,7 +222,6 @@ function applyFiltersAndSearch() {
 
 // Render Feed items
 function renderFeed() {
-    // Refresh Feather icons in case icons are rendered
     releaseFeed.innerHTML = '';
     
     if (filteredNotes.length === 0) {
@@ -211,6 +253,9 @@ function renderFeed() {
                     <a href="${note.link}" target="_blank" class="btn-icon" title="View official release documentation">
                         <i data-feather="external-link"></i>
                     </a>
+                    <button class="btn-icon btn-copy-action" title="Copy update text to clipboard" data-id="${note.id}">
+                        <i data-feather="copy"></i>
+                    </button>
                     <button class="btn-icon btn-tweet-action" title="Tweet this update" data-id="${note.id}">
                         <i data-feather="twitter"></i>
                     </button>
@@ -228,11 +273,80 @@ function renderFeed() {
             openTweetModal(note);
         });
 
+        // Attach Event listener to copy button
+        const copyBtn = card.querySelector('.btn-copy-action');
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            copyToClipboard(note.plain_text, copyBtn);
+        });
+
         releaseFeed.appendChild(card);
     });
 
     // Trigger feather replacement for new elements
     feather.replace();
+}
+
+// Copy update text to clipboard
+function copyToClipboard(text, buttonElement) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Success state feedback
+        buttonElement.classList.add('btn-copy-action-success');
+        buttonElement.innerHTML = '<i data-feather="check"></i>';
+        buttonElement.setAttribute('title', 'Copied!');
+        feather.replace();
+
+        // Revert feedback back after 2 seconds
+        setTimeout(() => {
+            buttonElement.classList.remove('btn-copy-action-success');
+            buttonElement.innerHTML = '<i data-feather="copy"></i>';
+            buttonElement.setAttribute('title', 'Copy update text to clipboard');
+            feather.replace();
+        }, 2000);
+    }).catch(err => {
+        console.error('Could not copy text to clipboard: ', err);
+    });
+}
+
+// Export parsed notes to CSV
+function exportToCSV() {
+    if (filteredNotes.length === 0) {
+        alert("There is no filtered data available to export.");
+        return;
+    }
+
+    const headers = ['Date', 'Type', 'Link', 'Content'];
+    const csvRows = [headers.join(',')];
+
+    filteredNotes.forEach(note => {
+        // Escape quotes inside field data to make it CSV compliant
+        const cleanContent = note.plain_text.replace(/"/g, '""');
+        const row = [
+            `"${note.date}"`,
+            `"${note.type}"`,
+            `"${note.link}"`,
+            `"${cleanContent}"`
+        ];
+        csvRows.push(row.join(','));
+    });
+
+    const csvString = csvRows.join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    
+    // Create virtual anchor link and trigger download
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    const filterSuffix = currentFilter.toLowerCase().replace(' ', '-');
+    const today = new Date().toISOString().split('T')[0];
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `bigquery_releases_${filterSuffix}_${today}.csv`);
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 // Render Skeleton Screen
