@@ -5,9 +5,14 @@ let currentFilter = 'all';
 let currentSearch = '';
 let selectedNote = null;
 
+// UX & Usability States
+let visibleCount = 15;
+const bookmarkedNotes = new Set(JSON.parse(localStorage.getItem('bookmarks') || '[]'));
+
 // DOM Elements
 const releaseFeed = document.getElementById('release-feed');
 const emptyState = document.getElementById('empty-state');
+const btnEmptyReset = document.getElementById('btn-empty-reset');
 const btnRefresh = document.getElementById('btn-refresh');
 const lastUpdatedTime = document.getElementById('last-updated-time');
 const searchInput = document.getElementById('search-input');
@@ -15,6 +20,9 @@ const searchClear = document.getElementById('search-clear');
 const categoryFilters = document.getElementById('category-filters');
 const btnExport = document.getElementById('btn-export');
 const btnThemeToggle = document.getElementById('btn-theme-toggle');
+const loadMoreContainer = document.getElementById('load-more-container');
+const btnLoadMore = document.getElementById('btn-load-more');
+const toastContainer = document.getElementById('toast-container');
 
 // Stats Elements
 const statTotal = document.getElementById('stat-total');
@@ -36,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     fetchReleases();
     setupEventListeners();
+    setupKeyboardShortcuts();
 });
 
 // Theme Initialization
@@ -59,7 +68,51 @@ function updateThemeIcon(isLight) {
     feather.replace();
 }
 
-// Setup Listeners
+// Reusable Toast Notification System
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    let iconName = 'info';
+    if (type === 'success') iconName = 'check-circle';
+    if (type === 'error') iconName = 'alert-circle';
+    
+    toast.innerHTML = `
+        <i data-feather="${iconName}"></i>
+        <span class="toast-message">${message}</span>
+    `;
+    
+    toastContainer.appendChild(toast);
+    feather.replace();
+    
+    // Smooth fadeout and remove toast
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    }, 3500);
+}
+
+// Keyboard shortcuts mapping
+function setupKeyboardShortcuts() {
+    window.addEventListener('keydown', (e) => {
+        // Press "/" to focus search (unless in an input field already)
+        if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+            e.preventDefault();
+            searchInput.focus();
+            showToast("Search focused", "info");
+        }
+        
+        // Press "Escape" to close active modals
+        if (e.key === 'Escape' && tweetModal.classList.contains('active')) {
+            closeTweetModal();
+            showToast("Composer closed", "info");
+        }
+    });
+}
+
+// Setup Event Listeners
 function setupEventListeners() {
     // Refresh button
     btnRefresh.addEventListener('click', () => {
@@ -73,16 +126,40 @@ function setupEventListeners() {
             document.body.classList.remove('light-theme');
             localStorage.setItem('theme', 'dark');
             updateThemeIcon(false);
+            showToast("Switched to dark theme", "info");
         } else {
             document.body.classList.add('light-theme');
             localStorage.setItem('theme', 'light');
             updateThemeIcon(true);
+            showToast("Switched to light theme", "info");
         }
     });
 
     // Export CSV
     btnExport.addEventListener('click', () => {
         exportToCSV();
+    });
+
+    // Load More action
+    btnLoadMore.addEventListener('click', () => {
+        visibleCount += 15;
+        renderFeed();
+    });
+
+    // Empty state Reset
+    btnEmptyReset.addEventListener('click', () => {
+        searchInput.value = '';
+        currentSearch = '';
+        searchClear.style.display = 'none';
+        
+        const allPill = categoryFilters.querySelector('[data-filter="all"]');
+        if (allPill) {
+            allPill.click();
+        } else {
+            currentFilter = 'all';
+            applyFiltersAndSearch();
+        }
+        showToast("Search and filters reset", "info");
     });
 
     // Search input
@@ -150,12 +227,10 @@ function setupEventListeners() {
 
 // Fetch Releases from API
 async function fetchReleases(forceRefresh = false) {
-    // Show spinner and loader
     const spinner = btnRefresh.querySelector('.spinner-icon');
     spinner.classList.add('spinning');
     btnRefresh.disabled = true;
     
-    // Render loading state if empty
     if (releaseNotes.length === 0) {
         renderSkeleton();
     }
@@ -174,11 +249,21 @@ async function fetchReleases(forceRefresh = false) {
             
             updateStats();
             applyFiltersAndSearch();
+            
+            if (forceRefresh) {
+                if (data.status === 'warning') {
+                    showToast(data.message, "error");
+                } else {
+                    showToast("Changelog feed refreshed successfully!", "success");
+                }
+            }
         } else {
             showErrorState(data.message || "Failed to load release notes");
+            showToast(data.message, "error");
         }
     } catch (err) {
         showErrorState("Network error fetching release notes. Please check connection.");
+        showToast("Network error. Serving offline mode.", "error");
         console.error(err);
     } finally {
         spinner.classList.remove('spinning');
@@ -203,6 +288,9 @@ function updateStats() {
 function applyFiltersAndSearch() {
     filteredNotes = releaseNotes;
 
+    // Reset pagination to first chunk on filter change
+    visibleCount = 15;
+
     // 1. Filter by category
     if (currentFilter !== 'all') {
         filteredNotes = filteredNotes.filter(note => note.type.toLowerCase() === currentFilter.toLowerCase());
@@ -226,16 +314,22 @@ function renderFeed() {
     
     if (filteredNotes.length === 0) {
         emptyState.style.display = 'flex';
+        loadMoreContainer.style.display = 'none';
         return;
     }
 
     emptyState.style.display = 'none';
 
-    filteredNotes.forEach(note => {
+    // Paginate visible notes
+    const visibleNotes = filteredNotes.slice(0, visibleCount);
+
+    visibleNotes.forEach(note => {
         const card = document.createElement('article');
         const categoryClass = `category-${note.type.toLowerCase().replace(' ', '-')}`;
         card.className = `release-card ${categoryClass}`;
         card.id = note.id;
+
+        const isBookmarked = bookmarkedNotes.has(note.id);
 
         // Render card inner content
         card.innerHTML = `
@@ -253,6 +347,9 @@ function renderFeed() {
                     <a href="${note.link}" target="_blank" class="btn-icon" title="View official release documentation">
                         <i data-feather="external-link"></i>
                     </a>
+                    <button class="btn-icon btn-bookmark-action ${isBookmarked ? 'bookmarked' : ''}" title="${isBookmarked ? 'Remove bookmark' : 'Bookmark this update'}" data-id="${note.id}">
+                        <i data-feather="bookmark"></i>
+                    </button>
                     <button class="btn-icon btn-copy-action" title="Copy update text to clipboard" data-id="${note.id}">
                         <i data-feather="copy"></i>
                     </button>
@@ -280,10 +377,43 @@ function renderFeed() {
             copyToClipboard(note.plain_text, copyBtn);
         });
 
+        // Attach Event listener to bookmark button
+        const bookmarkBtn = card.querySelector('.btn-bookmark-action');
+        bookmarkBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleBookmark(note.id, bookmarkBtn);
+        });
+
         releaseFeed.appendChild(card);
     });
 
+    // Manage visibility of "Load More" button
+    if (filteredNotes.length > visibleCount) {
+        loadMoreContainer.style.display = 'flex';
+    } else {
+        loadMoreContainer.style.display = 'none';
+    }
+
     // Trigger feather replacement for new elements
+    feather.replace();
+}
+
+// Bookmark status toggle
+function toggleBookmark(noteId, buttonElement) {
+    if (bookmarkedNotes.has(noteId)) {
+        bookmarkedNotes.delete(noteId);
+        buttonElement.classList.remove('bookmarked');
+        buttonElement.setAttribute('title', 'Bookmark this update');
+        showToast("Bookmark removed", "info");
+    } else {
+        bookmarkedNotes.add(noteId);
+        buttonElement.classList.add('bookmarked');
+        buttonElement.setAttribute('title', 'Remove bookmark');
+        showToast("Bookmark added successfully!", "success");
+    }
+    
+    // Save to local storage
+    localStorage.setItem('bookmarks', JSON.stringify(Array.from(bookmarkedNotes)));
     feather.replace();
 }
 
@@ -295,15 +425,18 @@ function copyToClipboard(text, buttonElement) {
         buttonElement.innerHTML = '<i data-feather="check"></i>';
         buttonElement.setAttribute('title', 'Copied!');
         feather.replace();
+        
+        showToast("Content copied to clipboard", "success");
 
-        // Revert feedback back after 2 seconds
+        // Revert feedback back after 2.5 seconds
         setTimeout(() => {
             buttonElement.classList.remove('btn-copy-action-success');
             buttonElement.innerHTML = '<i data-feather="copy"></i>';
             buttonElement.setAttribute('title', 'Copy update text to clipboard');
             feather.replace();
-        }, 2000);
+        }, 2500);
     }).catch(err => {
+        showToast("Copy failed", "error");
         console.error('Could not copy text to clipboard: ', err);
     });
 }
@@ -311,7 +444,7 @@ function copyToClipboard(text, buttonElement) {
 // Export parsed notes to CSV
 function exportToCSV() {
     if (filteredNotes.length === 0) {
-        alert("There is no filtered data available to export.");
+        showToast("No data to export", "error");
         return;
     }
 
@@ -347,6 +480,8 @@ function exportToCSV() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    
+    showToast(`Exported ${filteredNotes.length} rows to CSV`, "success");
 }
 
 // Render Skeleton Screen
@@ -357,6 +492,7 @@ function renderSkeleton() {
         <div class="skeleton-card"></div>
     `;
     emptyState.style.display = 'none';
+    loadMoreContainer.style.display = 'none';
 }
 
 // Show Error state
@@ -371,6 +507,7 @@ function showErrorState(msg) {
         </div>
     `;
     emptyState.style.display = 'none';
+    loadMoreContainer.style.display = 'none';
     feather.replace();
 }
 

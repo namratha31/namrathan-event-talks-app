@@ -92,7 +92,7 @@
         <section class="toolbar">
             <div class="search-box">
                 <i data-feather="search" class="search-icon"></i>
-                <input type="text" id="search-input" placeholder="Search release notes by keyword or feature..." autocomplete="off">
+                <input type="text" id="search-input" placeholder="Search release notes... (Press '/' to focus)" autocomplete="off">
                 <button id="search-clear" class="btn-clear" style="display: none;">
                     <i data-feather="x"></i>
                 </button>
@@ -119,6 +119,10 @@
                 </div>
                 <h3>No updates found</h3>
                 <p>Try refining your search terms or filter selections.</p>
+                <button id="btn-empty-reset" class="btn btn-secondary" style="margin-top: 16px;">
+                    <i data-feather="rotate-ccw"></i>
+                    <span>Reset Filters</span>
+                </button>
             </div>
 
             <!-- Feed List -->
@@ -127,6 +131,14 @@
                 <div class="skeleton-card"></div>
                 <div class="skeleton-card"></div>
                 <div class="skeleton-card"></div>
+            </div>
+            
+            <!-- Load More Container -->
+            <div id="load-more-container" class="load-more-container" style="display: none;">
+                <button id="btn-load-more" class="btn btn-secondary">
+                    <span>Load More Updates</span>
+                    <i data-feather="chevron-down"></i>
+                </button>
             </div>
         </main>
         
@@ -191,6 +203,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="toast-container"></div>
 
     <!-- Initialization -->
     <script>
